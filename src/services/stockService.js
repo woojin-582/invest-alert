@@ -1,11 +1,21 @@
-// ⚠️ 아래 키를 실제 발급받은 키로 교체하세요
 const KIS_CONFIG = {
   appKey:    'PSw47PdQVop3TeQgYTAwvDyXOQprPHQ9USNy',
   appSecret: '6td5IHGq32qioOfz0JXGv5TFxNeppCjn2dDrM8/fvyzea/7Wc2icQhc1wdwhqLe4TYNpas6QgAHGiu1XbSZQAclFLwvuG9YyhOc3Hz04zolvg3Acgx6SllZd3UpDglkKpoG2mnUCcd1F+Pb0Bto1satz1i0FKzsUeasyg1/GI6atwgPej8Y=',
 };
 const KIS_BASE = 'https://openapi.koreainvestment.com:9443';
 
-// 토큰 캐시 (메모리)
+// 자주 쓰는 종목명 로컬 테이블 (API 파싱 실패 대비)
+const KR_NAME_TABLE = {
+  '005930': '삼성전자',   '000660': 'SK하이닉스',  '005380': '현대차',
+  '086280': '현대글로비스','035420': 'NAVER',        '035720': '카카오',
+  '005490': 'POSCO홀딩스','000270': '기아',          '068270': '셀트리온',
+  '051910': 'LG화학',     '006400': '삼성SDI',       '003550': 'LG',
+  '012330': '현대모비스',  '028260': '삼성물산',      '096770': 'SK이노베이션',
+  '069500': 'KODEX 200',  '360750': 'TIGER 미국S&P500', '133690': 'TIGER NASDAQ100',
+  '114800': 'KODEX 인버스','252670': 'KODEX 200선물인버스2X',
+};
+
+// 토큰 캐시
 let tokenCache = { token: null, expires: 0 };
 
 async function getKisToken() {
@@ -20,27 +30,54 @@ async function getKisToken() {
   return tokenCache.token;
 }
 
+// 종목명 별도 조회 API
+async function getKrStockName(code, token) {
+  // 1. 로컬 테이블 먼저 확인
+  if (KR_NAME_TABLE[code]) return KR_NAME_TABLE[code];
+
+  // 2. KIS 종목정보 API 조회
+  try {
+    const res = await fetch(
+      `${KIS_BASE}/uapi/domestic-stock/v1/quotations/search-stock-info?PRDT_TYPE_CD=300&PDNO=${code}`,
+      { headers: { Authorization:`Bearer ${token}`, appkey:KIS_CONFIG.appKey, appsecret:KIS_CONFIG.appSecret, tr_id:'CTPF1002R', custtype:'P' } }
+    );
+    const data = await res.json();
+    const output = data?.output;
+    const name = output?.prdt_abrv_name || output?.prdt_name || output?.hts_kor_isnm || '';
+    if (name && name.trim() !== '' && name !== code) return name.trim();
+  } catch {}
+
+  // 3. 둘 다 실패하면 코드 반환
+  return code;
+}
+
 export async function getKrStock(code) {
   const token = await getKisToken();
-  const res = await fetch(
-    `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=${code}`,
-    { headers: { Authorization:`Bearer ${token}`, appkey:KIS_CONFIG.appKey, appsecret:KIS_CONFIG.appSecret, tr_id:'FHKST01010100', custtype:'P' } }
-  );
-  const data = await res.json();
+
+  // 현재가 조회와 종목명 조회 동시 실행
+  const [priceRes, name] = await Promise.all([
+    fetch(
+      `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=${code}`,
+      { headers: { Authorization:`Bearer ${token}`, appkey:KIS_CONFIG.appKey, appsecret:KIS_CONFIG.appSecret, tr_id:'FHKST01010100', custtype:'P' } }
+    ),
+    getKrStockName(code, token)
+  ]);
+
+  const data   = await priceRes.json();
   const output = data?.output;
   if (!output) throw new Error('데이터 없음');
+
   return {
-    code, market: 'KR',
-    name: output.hts_kor_isnm || output.prdt_abrv_name || code,
-    price: Number(output.stck_prpr),
-    change: Number(output.prdy_vrss),
+    code, market: 'KR', name,
+    price:      Number(output.stck_prpr),
+    change:     Number(output.prdy_vrss),
     changeRate: Number(output.prdy_ctrt),
-    updatedAt: new Date().toISOString(),
+    updatedAt:  new Date().toISOString(),
   };
 }
 
 export async function getUsStock(ticker) {
-  const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`);
+  const res  = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`);
   const data = await res.json();
   const meta = data?.chart?.result?.[0]?.meta;
   if (!meta) throw new Error('Yahoo Finance 데이터 없음');
@@ -49,8 +86,8 @@ export async function getUsStock(ticker) {
   return {
     code: ticker, market: 'US',
     name: meta.shortName || ticker,
-    price, change: price-prev,
-    changeRate: prev !== 0 ? ((price-prev)/prev)*100 : 0,
+    price, change: price - prev,
+    changeRate: prev !== 0 ? ((price - prev) / prev) * 100 : 0,
     updatedAt: new Date().toISOString(),
   };
 }
