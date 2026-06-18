@@ -27,8 +27,9 @@
     .summary-divider { height: 1px; background: #F3F4F6; margin: 12px 0; }
     .positive { color: #D85A30; }
     .negative { color: #1D9E75; }
+    .group-header { font-size: 13px; font-weight: 600; color: #6B7280; padding: 16px 16px 6px; letter-spacing: 0.3px; }
     .stock-list { padding: 0 0 100px; }
-    .stock-card { background: #fff; margin: 10px 16px 0; border-radius: 12px; padding: 14px; border: 1px solid #E5E7EB; border-left-width: 4px; cursor: pointer; active-opacity: 0.7; }
+    .stock-card { background: #fff; margin: 6px 16px 0; border-radius: 12px; padding: 14px; border: 1px solid #E5E7EB; border-left-width: 4px; cursor: pointer; }
     .stock-card:active { opacity: 0.7; }
     .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
     .stock-name { font-size: 16px; font-weight: 600; }
@@ -45,7 +46,6 @@
     .empty-icon { font-size: 48px; margin-bottom: 16px; }
     .empty-title { font-size: 18px; font-weight: 600; color: #374151; margin-bottom: 8px; }
     .empty-desc { font-size: 14px; color: #9CA3AF; line-height: 1.6; }
-    /* 모달 */
     .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: flex-end; justify-content: center; z-index: 200; }
     .modal-bg.open { display: flex; }
     .modal { background: #fff; border-radius: 20px 20px 0 0; padding: 20px 16px 48px; width: 100%; max-width: 480px; max-height: 90dvh; overflow-y: auto; }
@@ -74,35 +74,29 @@
     </div>
     <div class="header-btns">
       <button class="icon-btn" onclick="refreshData()">🔄</button>
-      <button class="icon-btn" onclick="alert('설정\n\n• 종목 탭: 수정/삭제\n• 🔄 버튼: 수동 새로고침\n• 5분마다 자동 갱신')">⚙️</button>
+      <button class="icon-btn" onclick="alert('종목 탭: 수정/삭제\n🔄 버튼: 수동 새로고침\n5분마다 자동 갱신')">⚙️</button>
     </div>
   </div>
 
   <div id="alert-banner" class="alert-banner">⚠️ <span id="alert-text"></span></div>
   <div id="summary"></div>
   <div id="stock-list" class="stock-list"></div>
-
   <button class="fab" onclick="openAddModal()">+</button>
 
-  <!-- 종목 추가/수정 모달 -->
   <div class="modal-bg" id="add-modal">
     <div class="modal">
       <div class="modal-title">
-        <span>종목 추가</span>
+        <span id="modal-title-text">종목 추가</span>
         <button class="modal-close" onclick="closeAddModal()">✕</button>
       </div>
-
       <div class="quick-chips" id="quick-chips"></div>
-
       <label class="form-label">종목코드</label>
       <div class="code-row">
-        <input class="form-input" id="f-code" placeholder="005380 또는 NVDA" style="flex:1" />
+        <input class="form-input" id="f-code" placeholder="005380 또는 QQQ" style="flex:1" />
         <button class="fetch-btn" id="fetch-btn" onclick="fetchPrice()">현재가 조회</button>
       </div>
-
       <label class="form-label">종목명</label>
       <input class="form-input" id="f-name" placeholder="예: 현대차" />
-
       <div class="form-row">
         <div><label class="form-label">매입가 (평단)</label><input class="form-input" id="f-buy" type="number" placeholder="75000" /></div>
         <div><label class="form-label">현재가</label><input class="form-input" id="f-cur" type="number" placeholder="자동 조회" /></div>
@@ -111,7 +105,6 @@
         <div><label class="form-label">추적 최고점</label><input class="form-input" id="f-high" type="number" placeholder="역대 최고가" /></div>
         <div><label class="form-label">보유 주수</label><input class="form-input" id="f-qty" type="number" placeholder="100" /></div>
       </div>
-
       <button class="save-btn" id="save-btn" onclick="saveStock()">종목 추가</button>
       <button class="delete-btn" id="delete-btn" onclick="deleteCurrentStock()">🗑 이 종목 삭제</button>
     </div>
