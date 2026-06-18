@@ -1,12 +1,14 @@
 import { analyzeStock, updateHighPrice } from './utils/investmentLogic.js';
-import { loadStocks, addStock, deleteStock, updateStock } from './services/storage.js';
+import { loadStocks, saveStocks, addStock, deleteStock, updateStock } from './services/storage.js';
 import { getStockPrice } from './services/stockService.js';
 
 const QUICK_STOCKS = [
-  {name:'삼성전자', code:'005930'}, {name:'SK하이닉스', code:'000660'},
-  {name:'현대차', code:'005380'},   {name:'현대글로비스', code:'086280'},
-  {name:'KODEX 200', code:'069500'},{name:'TIGER S&P500', code:'360750'},
-  {name:'NVDA', code:'NVDA'},       {name:'TSLA', code:'TSLA'},
+  {name:'삼성전자',     code:'005930'}, {name:'삼성전자우',   code:'005935'},
+  {name:'SK하이닉스',   code:'000660'}, {name:'현대차',       code:'005380'},
+  {name:'현대글로비스', code:'086280'}, {name:'두산에너빌리티',code:'034020'},
+  {name:'삼성에스디에스',code:'018260'},{name:'QQQ',          code:'QQQ'   },
+  {name:'SOXX',         code:'SOXX'  }, {name:'AIQ',          code:'AIQ'   },
+  {name:'NVDA',         code:'NVDA'  }, {name:'TSLA',         code:'TSLA'  },
 ];
 
 const ACTION_COLORS = {
@@ -18,8 +20,7 @@ const ACTION_COLORS = {
   RECOVER_PRINCIPAL:  {bg:'#EEEDFE', text:'#3C3489', border:'#7F77DD'},
 };
 
-let stocks = loadStocks();
-let editingId = null; // 수정 중인 종목 ID
+let currentEditId = null;
 
 // ─── 렌더링 ──────────────────────────────────────────────────────────────────
 
@@ -32,9 +33,11 @@ function renderAll(items) {
 function renderSummary(items) {
   const el = document.getElementById('summary');
   if (!items || items.length === 0) { el.innerHTML = ''; return; }
+
   const kr = items.filter(i => i.stock.market === 'KR');
   const us = items.filter(i => i.stock.market === 'US');
   let html = '<div class="summary-box">';
+
   if (kr.length > 0) {
     const cost = kr.reduce((s,i) => s + i.analysis.totalCost, 0);
     const value = kr.reduce((s,i) => s + i.analysis.totalValue, 0);
@@ -68,36 +71,53 @@ function renderStockList(items) {
     el.innerHTML = `<div class="empty"><div class="empty-icon">📊</div><div class="empty-title">종목을 추가하세요</div><div class="empty-desc">+ 버튼을 눌러 관리할 종목을 추가하면<br>자동으로 매매 신호를 알려드립니다.</div></div>`;
     return;
   }
-  el.innerHTML = items.map(({stock, analysis}) => {
-    const c = ACTION_COLORS[analysis.action] || ACTION_COLORS.HOLD;
-    const retSign  = analysis.returnRate   >= 0 ? '+' : '';
-    const highSign = analysis.fromHighRate >= 0 ? '+' : '';
-    const profitStr = analysis.currencySymbol === '$'
-      ? `${analysis.profitAmount>=0?'+':''}$${Math.abs(analysis.profitAmount).toFixed(2)}`
-      : `${analysis.profitAmount>=0?'+':''}${Math.round(analysis.profitAmount).toLocaleString()}원`;
-    const priceStr = stock.market === 'US'
-      ? `$${stock.currentPrice.toLocaleString()}`
-      : `${stock.currentPrice.toLocaleString()}원`;
 
-    return `<div class="stock-card" style="border-left-color:${c.border}" onclick="openEditModal('${stock.id}')">
-      <div class="card-header">
-        <div>
-          <div class="stock-name">${stock.name}</div>
-          <div class="stock-code">${stock.code} · ${stock.quantity.toLocaleString()}주</div>
-        </div>
-        <div class="action-badge" style="background:${c.bg};color:${c.text}">${analysis.actionEmoji} ${analysis.actionLabel}</div>
-      </div>
-      <div class="metrics-row">
-        <div><div class="metric-label">현재가</div><div class="metric-value">${priceStr}</div></div>
-        <div><div class="metric-label">수익률</div><div class="metric-value ${analysis.returnRate>=0?'positive':'negative'}">${retSign}${analysis.returnRate.toFixed(1)}%</div></div>
-        <div><div class="metric-label">고점대비</div><div class="metric-value" style="color:#BA7517">${highSign}${analysis.fromHighRate.toFixed(1)}%</div></div>
-      </div>
-      <div class="profit-row">
-        <span class="profit-label">평가손익</span>
-        <span class="profit-value ${analysis.profitAmount>=0?'positive':'negative'}">${profitStr}</span>
-      </div>
-    </div>`;
-  }).join('');
+  const kr = items.filter(i => i.stock.market === 'KR');
+  const us = items.filter(i => i.stock.market === 'US');
+
+  let html = '';
+
+  // 국내 그룹
+  if (kr.length > 0) {
+    html += `<div class="group-header">🇰🇷 국내 주식</div>`;
+    html += kr.map(i => renderCard(i)).join('');
+  }
+
+  // 해외 그룹
+  if (us.length > 0) {
+    html += `<div class="group-header">🌏 해외 주식 / ETF</div>`;
+    html += us.map(i => renderCard(i)).join('');
+  }
+
+  el.innerHTML = html;
+}
+
+function renderCard({stock, analysis}) {
+  const c = ACTION_COLORS[analysis.action] || ACTION_COLORS.HOLD;
+  const retSign  = analysis.returnRate   >= 0 ? '+' : '';
+  const highSign = analysis.fromHighRate >= 0 ? '+' : '';
+  const profitStr = analysis.currencySymbol === '$'
+    ? `${analysis.profitAmount>=0?'+':''}$${Math.abs(analysis.profitAmount).toFixed(2)}`
+    : `${analysis.profitAmount>=0?'+':''}${Math.round(analysis.profitAmount).toLocaleString()}원`;
+  const priceStr = stock.market === 'US'
+    ? `$${stock.currentPrice.toLocaleString()}`
+    : `${stock.currentPrice.toLocaleString()}원`;
+
+  return `<div class="stock-card" style="border-left-color:${c.border}" onclick="openEditModal('${stock.id}')">
+    <div class="card-header">
+      <div><div class="stock-name">${stock.name}</div><div class="stock-code">${stock.code} · ${stock.quantity.toLocaleString()}주</div></div>
+      <div class="action-badge" style="background:${c.bg};color:${c.text}">${analysis.actionEmoji} ${analysis.actionLabel}</div>
+    </div>
+    <div class="metrics-row">
+      <div><div class="metric-label">현재가</div><div class="metric-value">${priceStr}</div></div>
+      <div><div class="metric-label">수익률</div><div class="metric-value ${analysis.returnRate>=0?'positive':'negative'}">${retSign}${analysis.returnRate.toFixed(1)}%</div></div>
+      <div><div class="metric-label">고점대비</div><div class="metric-value" style="color:#BA7517">${highSign}${analysis.fromHighRate.toFixed(1)}%</div></div>
+    </div>
+    <div class="profit-row">
+      <span class="profit-label">평가손익</span>
+      <span class="profit-value ${analysis.profitAmount>=0?'positive':'negative'}">${profitStr}</span>
+    </div>
+  </div>`;
 }
 
 function renderAlertBanner(items) {
@@ -105,7 +125,7 @@ function renderAlertBanner(items) {
   const banner = document.getElementById('alert-banner');
   const text   = document.getElementById('alert-text');
   if (alerts.length > 0) {
-    text.textContent = `${alerts.length}개 종목 매매 신호: ${alerts.map(i=>i.stock.name).join(', ')}`;
+    text.textContent = `${alerts.length}개 종목에 매매 신호! (${alerts.map(i=>i.stock.name).join(', ')})`;
     banner.style.display = 'flex';
   } else {
     banner.style.display = 'none';
@@ -115,27 +135,38 @@ function renderAlertBanner(items) {
 // ─── 데이터 갱신 ─────────────────────────────────────────────────────────────
 
 async function refreshData() {
-  stocks = loadStocks();
+  const stocks = loadStocks();
   if (stocks.length === 0) { renderAll([]); return; }
+
   document.getElementById('stock-list').innerHTML = '<div class="loading">주가 조회 중... ⏳</div>';
+
   const results = await Promise.allSettled(stocks.map(s => getStockPrice(s.code)));
   const items = stocks.map((stock, i) => {
     const r = results[i];
     if (r.status === 'fulfilled') {
-      // 종목명은 저장된 이름 우선 사용 (API 이름으로 덮어쓰지 않음)
-      const updated = updateHighPrice({ ...stock, currentPrice: r.value.price });
-      updateStock(stock.id, { currentPrice: updated.currentPrice, highPrice: updated.highPrice });
+      const updated = updateHighPrice({ ...stock, currentPrice: r.value.price, name: r.value.name || stock.name });
+      updateStock(stock.id, { currentPrice: updated.currentPrice, highPrice: updated.highPrice, name: updated.name });
       return { stock: updated, analysis: analyzeStock(updated) };
     }
     return { stock, analysis: analyzeStock(stock) };
   });
-  items.sort((a,b) => {
+
+  // 알림 우선 정렬 후 국내/해외 순서 유지
+  items.sort((a, b) => {
     const order = {critical:0, warning:1, normal:2};
-    return order[a.analysis.urgency] - order[b.analysis.urgency];
+    if (order[a.analysis.urgency] !== order[b.analysis.urgency])
+      return order[a.analysis.urgency] - order[b.analysis.urgency];
+    // 같은 긴급도면 국내 먼저
+    if (a.stock.market !== b.stock.market)
+      return a.stock.market === 'KR' ? -1 : 1;
+    return 0;
   });
+
   renderAll(items);
   sendNotifications(items);
-  document.getElementById('last-updated').textContent = `업데이트: ${new Date().toLocaleTimeString('ko-KR')}`;
+
+  document.getElementById('last-updated').textContent =
+    `업데이트: ${new Date().toLocaleTimeString('ko-KR')}`;
 }
 
 // ─── 알림 ────────────────────────────────────────────────────────────────────
@@ -152,53 +183,55 @@ async function sendNotifications(items) {
   });
 }
 
-// ─── 종목 추가 모달 ───────────────────────────────────────────────────────────
+// ─── 모달: 종목 추가 ─────────────────────────────────────────────────────────
 
 window.openAddModal = () => {
-  editingId = null;
-  document.querySelector('#add-modal .modal-title span').textContent = '종목 추가';
+  currentEditId = null;
+  document.getElementById('modal-title-text').textContent = '종목 추가';
   document.getElementById('save-btn').textContent = '종목 추가';
   document.getElementById('delete-btn').style.display = 'none';
-  ['f-code','f-name','f-buy','f-cur','f-high','f-qty'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('f-code').disabled = false;
-  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  ['f-code','f-name','f-buy','f-cur','f-high','f-qty'].forEach(id => document.getElementById(id).value = '');
+
   const chips = document.getElementById('quick-chips');
   chips.innerHTML = QUICK_STOCKS.map(s =>
     `<span class="chip" onclick="applyQuick('${s.code}','${s.name}')">${s.name}</span>`
   ).join('');
+
   document.getElementById('add-modal').classList.add('open');
 };
 
+// ─── 모달: 종목 수정 ─────────────────────────────────────────────────────────
+
 window.openEditModal = (id) => {
-  const stock = loadStocks().find(s => s.id === id);
+  const stocks = loadStocks();
+  const stock = stocks.find(s => s.id === id);
   if (!stock) return;
-  editingId = id;
-  document.querySelector('#add-modal .modal-title span').textContent = '종목 수정';
-  document.getElementById('save-btn').textContent = '수정 완료';
+
+  currentEditId = id;
+  document.getElementById('modal-title-text').textContent = '종목 수정';
+  document.getElementById('save-btn').textContent = '수정 저장';
   document.getElementById('delete-btn').style.display = 'block';
-  document.getElementById('f-code').value    = stock.code;
-  document.getElementById('f-name').value    = stock.name;
-  document.getElementById('f-buy').value     = stock.buyPrice;
-  document.getElementById('f-cur').value     = stock.currentPrice;
-  document.getElementById('f-high').value    = stock.highPrice;
-  document.getElementById('f-qty').value     = stock.quantity;
-  document.getElementById('f-code').disabled = true; // 코드는 수정 불가
-  const chips = document.getElementById('quick-chips');
-  chips.innerHTML = QUICK_STOCKS.map(s =>
-    `<span class="chip${s.code===stock.code?' active':''}" onclick="applyQuick('${s.code}','${s.name}')">${s.name}</span>`
-  ).join('');
+  document.getElementById('f-code').disabled = true;
+
+  document.getElementById('f-code').value = stock.code;
+  document.getElementById('f-name').value = stock.name;
+  document.getElementById('f-buy').value  = stock.buyPrice;
+  document.getElementById('f-cur').value  = stock.currentPrice;
+  document.getElementById('f-high').value = stock.highPrice;
+  document.getElementById('f-qty').value  = stock.quantity;
+
+  document.getElementById('quick-chips').innerHTML = '';
   document.getElementById('add-modal').classList.add('open');
 };
 
 window.closeAddModal = () => {
   document.getElementById('add-modal').classList.remove('open');
-  editingId = null;
+  currentEditId = null;
 };
 
 window.applyQuick = (code, name) => {
-  if (!editingId) { // 추가 모드일 때만 코드 변경
-    document.getElementById('f-code').value = code;
-  }
+  document.getElementById('f-code').value = code;
   document.getElementById('f-name').value = name;
   document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
   event.target.classList.add('active');
@@ -207,21 +240,17 @@ window.applyQuick = (code, name) => {
 window.fetchPrice = async () => {
   const code = document.getElementById('f-code').value.trim().toUpperCase();
   if (!code) { alert('종목코드를 먼저 입력하세요'); return; }
+  const btn = document.getElementById('fetch-btn');
+  btn.textContent = '조회중...'; btn.disabled = true;
   try {
-    const btn = document.getElementById('fetch-btn');
-    btn.textContent = '조회중...'; btn.disabled = true;
     const quote = await getStockPrice(code);
-    document.getElementById('f-cur').value = quote.price;
-    // 종목명은 API에서 가져온 것을 사용하되, 이미 입력된 경우 유지
-    if (!document.getElementById('f-name').value) {
-      document.getElementById('f-name').value = quote.name || code;
-    }
+    document.getElementById('f-cur').value  = quote.price;
+    document.getElementById('f-name').value = quote.name || code;
     if (!document.getElementById('f-high').value) document.getElementById('f-high').value = quote.price;
-    alert(`✅ 현재가: ${quote.market==='US'?'$':''}${quote.price.toLocaleString()}`);
+    alert(`✅ ${quote.name}\n현재가: ${quote.market==='US'?'$':''}${quote.price.toLocaleString()}`);
   } catch {
-    alert('조회 실패. 직접 입력하세요.');
+    alert('조회 실패. 종목코드를 확인하거나 직접 입력하세요.');
   } finally {
-    const btn = document.getElementById('fetch-btn');
     btn.textContent = '현재가 조회'; btn.disabled = false;
   }
 };
@@ -234,15 +263,15 @@ window.saveStock = () => {
   const high = parseFloat(document.getElementById('f-high').value);
   const qty  = parseFloat(document.getElementById('f-qty').value);
 
-  if (!code || !name || isNaN(buy) || isNaN(cur) || isNaN(high) || isNaN(qty)) {
+  if (!code||!name||isNaN(buy)||isNaN(cur)||isNaN(high)||isNaN(qty)) {
     alert('모든 항목을 입력하세요'); return;
   }
 
-  if (editingId) {
-    // 수정 모드
-    updateStock(editingId, { name, buyPrice:buy, currentPrice:cur, highPrice:Math.max(cur,high), quantity:qty });
+  if (currentEditId) {
+    // 수정
+    updateStock(currentEditId, { name, buyPrice:buy, currentPrice:cur, highPrice:Math.max(cur,high), quantity:qty });
   } else {
-    // 추가 모드
+    // 추가
     addStock({ id: Date.now().toString()+Math.random().toString(36).slice(2), name, code, buyPrice:buy, currentPrice:cur, highPrice:Math.max(cur,high), quantity:qty, market:/^\d{6}$/.test(code)?'KR':'US' });
   }
   closeAddModal();
@@ -250,16 +279,17 @@ window.saveStock = () => {
 };
 
 window.deleteCurrentStock = () => {
-  if (!editingId) return;
-  const stock = loadStocks().find(s => s.id === editingId);
+  if (!currentEditId) return;
+  const stocks = loadStocks();
+  const stock = stocks.find(s => s.id === currentEditId);
   if (confirm(`${stock?.name} 종목을 삭제하시겠습니까?`)) {
-    deleteStock(editingId);
+    deleteStock(currentEditId);
     closeAddModal();
     refreshData();
   }
 };
 
-// ─── 자동 갱신 (5분마다) ─────────────────────────────────────────────────────
+// ─── 초기화 ──────────────────────────────────────────────────────────────────
 window.refreshData = refreshData;
 refreshData();
 setInterval(refreshData, 5 * 60 * 1000);
